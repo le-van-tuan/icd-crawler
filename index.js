@@ -5,7 +5,9 @@ const Excel = require('exceljs');
 (async () => {
 	try {
 		console.log("=======> Opening Browser...");
-		let results = [];
+		let icdResults = [];
+		let groups = [];
+
 		const browser = await puppeteer.launch({headless: false});
 		const page = await browser.newPage();
 		await page.goto('http://icd.kcb.vn/');
@@ -16,12 +18,24 @@ const Excel = require('exceljs');
 	        await dropDownMenu[0].click();
 	        await page.waitForSelector(`#uLeftMenu > ul > li:nth-child(${i + 1}) > div > i.glyphicon-chevron-down`);
 
-	        const chapters = await page.$$(`#uLeftMenu > ul > li:nth-child(${i + 1}) > div > div`);
-	        await chapters[0].click();
+	        const chapterMenu = await page.$$(`#uLeftMenu > ul > li:nth-child(${i + 1}) > div > div`);
+	        await chapterMenu[0].click();
+			await waitUntilContentLoaded(page);
 
-			const bodyHandle = await page.$(`#uLeftMenu > ul > li:nth-child(${i + 1}) > div`);
-			const html = await page.evaluate(body => body.innerHTML, bodyHandle);
-	        const $ = cheerio.load(html);
+			const dContent = await page.$(`#dContent`);
+			const dContentHtml = await page.evaluate(body => body.innerHTML, dContent);
+			const $dct = cheerio.load(dContentHtml);
+
+			let chapterHeaders = $dct(".chapter-header").children();
+			let vnHeader = $dct(chapterHeaders[0]).html().split("<br>")[1];
+			let enHeader = $dct(chapterHeaders[1]).html().split("<br>")[1];
+			let startID = $dct(chapterHeaders[0]).html().split("<br>")[2].split("-")[0].replace("(", "");
+			let endID = $dct(chapterHeaders[0]).html().split("<br>")[2].split("-")[1].replace(")", "");
+			groups.push({name: vnHeader, enName: enHeader, parent: "", startID: startID, endID: endID});
+
+			const menuBlock = await page.$(`#uLeftMenu > ul > li:nth-child(${i + 1}) > div`);
+			const menuHtml = await page.evaluate(body => body.innerHTML, menuBlock);
+	        const $ = cheerio.load(menuHtml);
 	        let title = $("a").text();
 	        console.log("=======> Begin crawl: " + title);
 
@@ -36,6 +50,9 @@ const Excel = require('exceljs');
 			    const $ = cheerio.load(content);
 
 				let rows = $('div#dContent').children();
+				let groupHeader = $('div#dContent').children(".group-header");
+				groups.push({name: $(groupHeader).children("div").first().text(), enName: $(groupHeader).children("div").last().text(), parent: vnHeader, startID: $(groupHeader).attr("item-id").split("-")[0], endID: $(groupHeader).attr("item-id").split("-")[1]});
+
 
 			    let id = "";
 			    let name = "";
@@ -49,7 +66,7 @@ const Excel = require('exceljs');
 			    	let clazzName = await $(element).attr("class");
 			    	if (clazzName.includes("line-item")) {
 			    		if (id) {
-			    			results.push({id, name, engName, groupName, desc, engDesc});
+			    			icdResults.push({id, name, engName, groupName, desc, engDesc});
 			    		}
 			    		id = $(element).children(clazzName.includes("group") ? ".type-header" : ".item-header").text();
 			    		$(element).find(".item-name").each((index, el) => {
@@ -73,14 +90,15 @@ const Excel = require('exceljs');
 			    		});
 			    	}
 			    	if ((i == (rows.length - 1))) {
-			    		results.push({id, name, engName, groupName, desc, engDesc});
+			    		icdResults.push({id, name, engName, groupName, desc, engDesc});
 			    	};
 			    }
 			}
 			console.log("=======> Finished crawl: " + title);
 	    }
-	    console.log("=======> Total results: " + results.length);
-	    await exportResults(results);
+	    console.log("=======> Total results: " + icdResults.length);
+		console.log("=======> Total groups: " + groups.length);
+	    await exportResults(icdResults, groups);
 		await browser.close();
 		console.log("=======> DONE <=========");
 	} catch (e) {
@@ -92,7 +110,7 @@ const waitUntilContentLoaded = async (page) => {
 	return await page.waitForSelector('#divMain > div > div.row.form-inline > div.col-xs-8 > div.page-refresh', {hidden : true}, 0);
 }
 
-const exportResults = async (results) => {
+const exportResults = async (icdResults, groups) => {
 	try {
 		console.log("=======> Begin export results to file...");
 		let workbook = new Excel.Workbook();
@@ -105,7 +123,7 @@ const exportResults = async (results) => {
 			{header: 'Mô Tả', key: 'desc', width: 100},
 			{header: 'Mô Tả Tiếng Anh', key: 'engDesc', width: 100}
 		];
-		results.forEach((e, index) => {
+		icdResults.forEach((e, index) => {
 			worksheet.addRow({
 				...e
 			});
@@ -113,6 +131,24 @@ const exportResults = async (results) => {
 		worksheet.getRow(1).eachCell((cell) => {
 			cell.font = {bold: true};
 		});
+
+		let groupsWs = workbook.addWorksheet('Nhom');
+		groupsWs.columns = [
+			{header: 'Tên Nhóm', key: 'name', width: 60},
+			{header: 'Tên Nhóm Tiếng Anh', key: 'enName', width: 60},
+			{header: 'Nhóm Cha', key: 'parent', width: 60},
+			{header: 'Mã Bắt Đầu', key: 'startID', width: 50},
+			{header: 'Mã Kết Thúc', key: 'endID', width: 50}
+		];
+		groups.forEach((e, index) => {
+			groupsWs.addRow({
+				...e
+			});
+		});
+		groupsWs.getRow(1).eachCell((cell) => {
+			cell.font = {bold: true};
+		});
+
 		await workbook.xlsx.writeFile('ICD-results.xlsx');
 		console.log("=======> Finished export result to file...");
 	} catch (e) {
