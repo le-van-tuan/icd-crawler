@@ -31,7 +31,7 @@ const Excel = require('exceljs');
 			let enHeader = $dct(chapterHeaders[1]).html().split("<br>")[1];
 			let startID = $dct(chapterHeaders[0]).html().split("<br>")[2].split("-")[0].replace("(", "");
 			let endID = $dct(chapterHeaders[0]).html().split("<br>")[2].split("-")[1].replace(")", "");
-			groups.push({name: vnHeader, enName: enHeader, parent: "", startID: startID, endID: endID});
+			groups.push({name: vnHeader, enName: enHeader, parent: "", enParent: "", startID: startID, endID: endID});
 
 			const menuBlock = await page.$(`#uLeftMenu > ul > li:nth-child(${i + 1}) > div`);
 			const menuHtml = await page.evaluate(body => body.innerHTML, menuBlock);
@@ -51,8 +51,7 @@ const Excel = require('exceljs');
 
 				let rows = $('div#dContent').children();
 				let groupHeader = $('div#dContent').children(".group-header");
-				groups.push({name: $(groupHeader).children("div").first().text(), enName: $(groupHeader).children("div").last().text(), parent: vnHeader, startID: $(groupHeader).attr("item-id").split("-")[0], endID: $(groupHeader).attr("item-id").split("-")[1]});
-
+				groups.push({name: $(groupHeader).children("div").first().text(), enName: $(groupHeader).children("div").last().text(), parent: vnHeader, enParent: enHeader, startID: $(groupHeader).attr("item-id").split("-")[0], endID: $(groupHeader).attr("item-id").split("-")[1]});
 
 			    let id = "";
 			    let name = "";
@@ -137,6 +136,7 @@ const exportResults = async (icdResults, groups) => {
 			{header: 'Tên Nhóm', key: 'name', width: 60},
 			{header: 'Tên Nhóm Tiếng Anh', key: 'enName', width: 60},
 			{header: 'Nhóm Cha', key: 'parent', width: 60},
+			{header: 'Nhóm Cha Tiếng Anh', key: 'enParent', width: 60},
 			{header: 'Mã Bắt Đầu', key: 'startID', width: 50},
 			{header: 'Mã Kết Thúc', key: 'endID', width: 50}
 		];
