@@ -12,6 +12,7 @@
     "cheerio": "^1.0.0",
     "exceljs": "^4.4.0",
     "pg": "^8.13.1",
+    "pg-format": "^1.0.4",
     "puppeteer": "^23.7.0",
     "request": "^2.88.2"
   }
