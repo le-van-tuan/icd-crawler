@@ -2,6 +2,15 @@ const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
 const Excel = require('exceljs');
 
+const {Client, Pool} = require("pg");
+const client = new Client({
+    user: "postgres",
+    password: "123456",
+    host: "192.168.100.15",
+    port: 5432,
+    database: "openpractice_demo",
+});
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 };
@@ -16,7 +25,30 @@ function getMatches(string, regex, index) {
     return matches;
 };
 
+async function connectPostgresql() {
+    await client.connect();
+};
+
+async function persistResult(groups, items) {
+    try {
+        const insertGroupSql = "INSERT INTO icd10_group_temp (id, name, start_code, end_code, parent_id, is_system) VALUES($1, $2, $3, $4, $5, $6)";
+        for (const gr of groups) {
+            await client.query(insertGroupSql, [gr.id, gr.name, gr.startCode, gr.endCode, gr.parentId, gr.system]);
+        }
+        
+        const insertItemSql = "INSERT INTO icd10_item_temp (id, name_vi, name_en, code, group_id, is_system) VALUES($1, $2, $3, $4, $5, $6)";
+        for (const it of items) {
+            await client.query(insertItemSql, [it.id, it.vnName, it.enName, it.code, it.groupId, it.system]);
+        }
+    } catch (e) {
+        console.error("****** FAILED TO PERSIST RESULT TO DB ******", e);
+    }
+};
+
 (async () => {
+    await connectPostgresql();
+    console.log("=== postgresql connected =====");
+
     console.log("=======> Opening Browser...");
     let itemIdCounter = 1;
     let icdItems = [];
@@ -46,10 +78,12 @@ function getMatches(string, regex, index) {
     await page.waitForNetworkIdle();
     await sleep(1000);
 
-    for (let index = 1; index < chapters.length; index++) {
+    for (let index = 0; index < chapters.length; index++) {
+        console.log("total chapers: ", chapters.length);
         let chapter = chapters[index];
 
-        let span = await chapter.$("span.cursor-pointer");
+        let clickableWrapper = await chapter.$("div.mat-tree-node");
+        let span = await clickableWrapper.$("span.cursor-pointer");
         await page.evaluate((element) => {
             element.click();
         }, span);
@@ -72,12 +106,16 @@ function getMatches(string, regex, index) {
         groups.push(group);
         groupIdCounter += 1;
 
-        let expandButton = await chapter.$$("button.mat-focus-indicator");
+        let expandButton = await clickableWrapper.$("mat-icon.mat-icon");
         await page.evaluate((element) => {
             element.click();
-        }, expandButton[0]);
-        await page.waitForNetworkIdle();
-        await sleep(1000);
+        }, expandButton);
+        console.log("chapter expanded");
+        
+        await waitUntilContentLoaded(page);
+        await sleep(2000);
+        if (index == 2) break;
+        continue;
 
         /**
          * Second Level
@@ -147,7 +185,7 @@ function getMatches(string, regex, index) {
             }
         }
 
-        if (index == 3) break;
+        if (index == 0) break;
     }
 
     console.log("=======> Total items: " + icdItems.length);
@@ -158,9 +196,14 @@ function getMatches(string, regex, index) {
     // console.log(icdItems);
     
     await exportResults(icdItems, groups);
+    // await persistResult(groups, icdItems);
     // await browser.close();
     console.log("=======> DONE <> NICK NỢ 1 THÙNG BIA =========");
 })();
+
+const waitUntilContentLoaded = async (page) => {
+    return await page.waitForSelector("div.card-body div.spinner-container", {hidden: true}, 0);
+};
 
 const exportResults = async (icdResults, groups) => {
 	try {
@@ -168,10 +211,11 @@ const exportResults = async (icdResults, groups) => {
 		let workbook = new Excel.Workbook();
 		let worksheet = workbook.addWorksheet('Ma ICD');
 		worksheet.columns = [
+            {header: "ID", key: "id", width: 10},
             {header: "Mã", key: "code", width: 10},
             {header: "Tên", key: "vnName", width: 60},
             {header: "Tên Tiếng Anh", key: "enName", width: 60},
-            {header: "Thuộc Nhóm", key: "groupId", width: 60}
+            {header: "Thuộc Nhóm", key: "groupId", width: 60},
         ];
 		icdResults.forEach((e, index) => {
 			worksheet.addRow({
@@ -184,10 +228,11 @@ const exportResults = async (icdResults, groups) => {
 
 		let groupsWs = workbook.addWorksheet('Nhom');
 		groupsWs.columns = [
+            {header: "ID", key: "id", width: 10},
             {header: "Tên Nhóm", key: "name", width: 60},
             {header: "Mã Bắt Đầu", key: "startCode", width: 50},
             {header: "Mã Kết Thúc", key: "endCode", width: 50},
-            {header: "Nhóm Cha", key: "parentId", width: 60},
+            {header: "Nhóm Cha", key: "parentId", width: 15},
         ];
 		groups.forEach((e, index) => {
 			groupsWs.addRow({
